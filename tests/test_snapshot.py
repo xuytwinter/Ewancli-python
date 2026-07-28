@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from paicli.snapshot import SnapshotService
+from ewancli.snapshot import SnapshotService
 
 
 def test_snapshot_restore(tmp_path, monkeypatch):

@@ -2,25 +2,25 @@ from __future__ import annotations
 
 import json
 
-from paicli.config import load_config
+from ewancli.config import load_config
 
 
 def test_config_precedence(tmp_path, monkeypatch):
     home = tmp_path / "home"
     project = tmp_path / "project"
-    (home / ".paicli").mkdir(parents=True)
-    (project / ".paicli").mkdir(parents=True)
-    (home / ".paicli" / "config.json").write_text(
+    (home / ".ewancli").mkdir(parents=True)
+    (project / ".ewancli").mkdir(parents=True)
+    (home / ".ewancli" / "config.json").write_text(
         json.dumps({"llm": {"provider": "home", "model": "home-model"}}),
         encoding="utf-8",
     )
-    (project / ".paicli" / "config.json").write_text(
+    (project / ".ewancli" / "config.json").write_text(
         json.dumps({"llm": {"provider": "project", "model": "project-model"}}),
         encoding="utf-8",
     )
-    (project / ".env").write_text("PAICLI_MODEL=env-file-model\n", encoding="utf-8")
+    (project / ".env").write_text("EWANCLI_MODEL=env-file-model\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("PAICLI_PROVIDER", "process")
+    monkeypatch.setenv("EWANCLI_PROVIDER", "process")
 
     config = load_config(
         project_root=project,
@@ -33,8 +33,8 @@ def test_config_precedence(tmp_path, monkeypatch):
 
 def test_provider_specific_api_key(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("PAICLI_PROVIDER", "deepseek")
-    monkeypatch.delenv("PAICLI_API_KEY", raising=False)
+    monkeypatch.setenv("EWANCLI_PROVIDER", "deepseek")
+    monkeypatch.delenv("EWANCLI_API_KEY", raising=False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
 
     config = load_config(project_root=tmp_path)

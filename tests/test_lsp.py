@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from paicli.lsp import diagnose_file
+from ewancli.lsp import diagnose_file
 
 
 def test_python_diagnostics(tmp_path):

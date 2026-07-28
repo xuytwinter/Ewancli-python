@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from PIL import Image
 
-from paicli.image import parse_image_references
-from paicli.llm.openai_compatible import OpenAICompatibleClient
+from ewancli.image import parse_image_references
+from ewancli.llm.openai_compatible import OpenAICompatibleClient
 
 
 def test_parse_local_image_reference(tmp_path):

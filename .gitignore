@@ -8,4 +8,6 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
-.paicli/
+.ewancli/
+.runtime/
+/.playwright-cli

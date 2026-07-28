@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 
-from paicli.config import load_config
-from paicli.mcp import McpClientManager
-from paicli.mcp.server import _handle_request
-from paicli.tools.base import ToolContext
+from ewancli.config import load_config
+from ewancli.mcp import McpClientManager
+from ewancli.mcp.server import _handle_request
+from ewancli.tools.base import ToolContext
 
 
 def test_mcp_tools_list(tmp_path, monkeypatch):
@@ -42,8 +42,8 @@ if __name__ == "__main__":
 """.lstrip(),
         encoding="utf-8",
     )
-    (tmp_path / ".paicli").mkdir()
-    (tmp_path / ".paicli" / "mcp.json").write_text(
+    (tmp_path / ".ewancli").mkdir()
+    (tmp_path / ".ewancli" / "mcp.json").write_text(
         json.dumps(
             {
                 "mcpServers": {
@@ -95,8 +95,8 @@ if __name__ == "__main__":
 """.lstrip(),
         encoding="utf-8",
     )
-    (tmp_path / ".paicli").mkdir()
-    (tmp_path / ".paicli" / "mcp.json").write_text(
+    (tmp_path / ".ewancli").mkdir()
+    (tmp_path / ".ewancli" / "mcp.json").write_text(
         json.dumps(
             {
                 "mcpServers": {

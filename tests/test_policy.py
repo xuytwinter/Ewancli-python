@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from paicli.policy.command_guard import CommandGuard, CommandPolicyError
-from paicli.policy.path_guard import PathGuard, PathPolicyError
+from ewancli.policy.command_guard import CommandGuard, CommandPolicyError
+from ewancli.policy.path_guard import PathGuard, PathPolicyError
 
 
 def test_path_guard_rejects_escape(tmp_path):

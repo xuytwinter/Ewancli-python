@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 from io import StringIO
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.keys import Keys
+from prompt_toolkit.output import DummyOutput
 from rich.console import Console
 
-from paicli.entrypoints.repl import _bottom_toolbar, _prompt_message
-from paicli.render import RichRenderer
+from ewancli.config import load_config
+from ewancli.entrypoints.repl import (
+    PermissionModeController,
+    _bottom_toolbar,
+    _permission_key_bindings,
+    _prompt_message,
+)
+from ewancli.render import RichRenderer
 
 
-def test_banner_renders_pi_home_layout():
+def test_banner_renders_ewan_identity():
     stream = StringIO()
     console = Console(file=stream, color_system=None, width=200)
     renderer = RichRenderer(console=console)
@@ -27,9 +38,10 @@ def test_banner_renders_pi_home_layout():
     )
 
     output = stream.getvalue()
-    assert "████████████" in output
-    assert "  ██    ██" in output
-    assert "PaiCLI v0.1.0" in output
+    assert "▰━━━━▰" in output
+    assert "╱╲" in output
+    assert chr(0x03C0) not in output
+    assert "Ewancli v0.1.0" in output
     assert "Signed in API Key" in output
     assert "What's new (v0.1.0)" in output
 
@@ -49,13 +61,59 @@ def test_prompt_message_keeps_status_and_input_together():
     assert "2 AGENTS.md files" in plain
     assert "1 MCP server" in plain
     assert "3 skills · Tools 12" in plain
-    assert "YOLO" not in plain
-    assert "Shift+Tab" not in plain
+    assert "Default  Shift+Tab" in plain
     assert "deepseek-v4-flash" in plain
     assert "█░░░░░░░░░░░ 1%" in plain
     assert "/tmp/project" in plain
     assert "\n\n* " in plain
     assert plain.endswith("\n* ")
+
+
+def test_permission_mode_toggle_applies_and_restores_full_access_policy(tmp_path):
+    config = load_config(project_root=tmp_path)
+    config.policy.hitl_mode = "always"
+    controller = PermissionModeController(config)
+
+    assert controller.mode == "default"
+    assert config.policy.hitl_mode == "always"
+    assert config.policy.path_guard_enabled
+    assert config.policy.command_guard_enabled
+
+    assert controller.toggle() == "auto"
+    assert config.policy.hitl_mode == "never"
+    assert not config.policy.path_guard_enabled
+    assert not config.policy.command_guard_enabled
+
+    assert controller.toggle() == "default"
+    assert config.policy.hitl_mode == "always"
+    assert config.policy.path_guard_enabled
+    assert config.policy.command_guard_enabled
+
+
+def test_shift_tab_is_bound_to_permission_mode_toggle(tmp_path):
+    controller = PermissionModeController(load_config(project_root=tmp_path))
+    bindings = _permission_key_bindings(controller)
+
+    assert any(binding.keys == (Keys.BackTab,) for binding in bindings.bindings)
+
+
+def test_shift_tab_input_toggles_live_permission_mode(tmp_path):
+    controller = PermissionModeController(load_config(project_root=tmp_path))
+
+    async def run_prompt() -> None:
+        with create_pipe_input() as pipe_input:
+            session = PromptSession(
+                input=pipe_input,
+                output=DummyOutput(),
+                key_bindings=_permission_key_bindings(controller),
+            )
+            pipe_input.send_text("\x1b[Z\r")
+            await session.prompt_async()
+
+    asyncio.run(run_prompt())
+
+    assert controller.mode == "auto"
+    assert controller.config.policy.hitl_mode == "never"
 
 
 def test_bottom_toolbar_uses_runtime_summary_segments():
@@ -79,8 +137,8 @@ def test_text_deltas_render_as_markdown_on_turn_complete():
     renderer = RichRenderer(console=console, context_window=1000)
 
     renderer.handle({"type": "thinking_delta", "thinking": "需要先确认项目结构"})
-    renderer.handle({"type": "text_delta", "text": "你好，我是 **Pai"})
-    renderer.handle({"type": "text_delta", "text": "CLI**\n\n- `read_file`\n- **网页搜索**"})
+    renderer.handle({"type": "text_delta", "text": "你好，我是 **Ewan"})
+    renderer.handle({"type": "text_delta", "text": "cli**\n\n- `read_file`\n- **网页搜索**"})
     renderer.handle({"type": "usage", "usage": {"input_tokens": 250, "output_tokens": 50}})
     renderer.handle({"type": "turn_complete"})
     renderer.handle({"type": "done", "total_turns": 1, "total_tokens": 300})
@@ -89,11 +147,11 @@ def test_text_deltas_render_as_markdown_on_turn_complete():
     assert "Thinking" in output
     assert "需要先确认项目结构" in output
     assert "Final Output" in output
-    assert "PaiCLI" in output
+    assert "Ewancli" in output
     assert "read_file" in output
     assert "网页搜索" in output
     assert "Run Summary" not in output
-    assert "**PaiCLI**" not in output
+    assert "**Ewancli**" not in output
     assert "`read_file`" not in output
 
     stats = renderer.toolbar_status()
@@ -120,6 +178,56 @@ def test_interleaved_thinking_does_not_repeat_assistant_output_panels():
     assert output.count("Final Output") == 1
     assert output.count("Thinking") == 1
     assert "第一段第二段" in output
+
+
+def test_plan_status_and_scoped_thinking_render_with_task_identity():
+    stream = StringIO()
+    console = Console(file=stream, color_system=None, width=120)
+    renderer = RichRenderer(console=console)
+
+    renderer.handle({"type": "text_delta", "text": "正在规划任务"})
+    renderer.handle({"type": "plan_status", "phase": "planning"})
+    renderer.handle(
+        {
+            "type": "thinking_delta",
+            "thinking": "先拆分任务",
+            "phase": "planning",
+        }
+    )
+    renderer.handle(
+        {
+            "type": "plan_task_started",
+            "task_id": "task_1",
+            "task_description": "检查模型配置",
+        }
+    )
+    renderer.handle(
+        {
+            "type": "thinking_delta",
+            "thinking": "读取配置文件",
+            "phase": "execution",
+            "task_id": "task_1",
+        }
+    )
+    renderer.handle(
+        {
+            "type": "tool_call",
+            "name": "read_file",
+            "input": {"path": "config.py"},
+            "task_id": "task_1",
+        }
+    )
+
+    output = stream.getvalue()
+    assert "Plan" in output
+    assert "正在规划任务" in output
+    assert "Thinking · planning" in output
+    assert "先拆分任务" in output
+    assert "Running task_1" in output
+    assert "检查模型配置" in output
+    assert "Thinking · task_1" in output
+    assert "读取配置文件" in output
+    assert "Tool Use · task_1" in output
 
 
 def test_streaming_text_waits_for_turn_boundary_by_default():

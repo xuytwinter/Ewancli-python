@@ -3,9 +3,17 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from paicli.agent.orchestrator import AgentOrchestrator
-from paicli.config import load_config
-from paicli.tools import ToolRegistry, get_builtin_tools
+from ewancli.agent.orchestrator import (
+    AgentMessage,
+    AgentMessageType,
+    AgentOrchestrator,
+    AgentRole,
+    ExecutionStep,
+    StepStatus,
+    SubAgent,
+)
+from ewancli.config import load_config
+from ewancli.tools import ToolRegistry, get_builtin_tools
 
 
 def test_orchestrator_parses_steps_and_review_output(tmp_path, monkeypatch):
@@ -37,19 +45,119 @@ def test_orchestrator_runs_independent_workers_in_parallel(tmp_path, monkeypatch
 
     async def run():
         text = ""
+        done = None
         async for event in orchestrator.run("并行完成 A 和 B"):
             if event.get("type") == "text_delta":
                 text += str(event.get("text") or "")
+            elif event.get("type") == "done":
+                done = event
             elif event.get("type") == "error":
                 raise event["error"]
-        return text
+        return text, done
 
-    result = asyncio.run(run())
+    result, done = asyncio.run(run())
 
     assert "Multi-Agent task completed" in result
     assert "Task A result" in result
     assert "Task B result" in result
     assert client.peak_concurrency == 2
+    assert done is not None
+    assert done["total_turns"] == 5
+
+
+def test_orchestrator_parses_nested_plan_worker_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    orchestrator = _orchestrator(tmp_path, FakeTeamClient())
+
+    steps = orchestrator.parse_plan(
+        '{"steps":[{"id":"a","description":"complex","type":"ANALYSIS",'
+        '"mode":"plan","dependencies":[]}]}'
+    )
+
+    assert steps[0].mode == "plan"
+    assert (
+        orchestrator.workers[0].skill_context_buffer
+        is not orchestrator.workers[1].skill_context_buffer
+    )
+
+
+def test_subagent_can_delegate_its_task_to_plan_execute(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config = load_config(project_root=tmp_path)
+    registry = ToolRegistry()
+    worker = SubAgent(
+        name="worker-plan",
+        role=AgentRole.WORKER,
+        llm_client=FakeTeamClient(),
+        tool_registry=registry,
+        config=config,
+        cwd=str(tmp_path),
+    )
+
+    async def fake_plan_run(self, message):  # noqa: ARG001
+        yield {"type": "text_delta", "text": "nested plan completed"}
+        yield {
+            "type": "done",
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+            "total_tokens": 15,
+            "total_turns": 3,
+        }
+
+    monkeypatch.setattr("ewancli.agent.plan_execute.PlanExecuteAgent.run", fake_plan_run)
+
+    result = asyncio.run(worker.execute(AgentMessage.task("test", "complex task"), mode="plan"))
+
+    assert result.type == AgentMessageType.RESULT
+    assert result.content == "nested plan completed"
+    assert result.usage.total_tokens == 15
+    assert result.turns == 3
+
+
+def test_subagent_plan_depth_is_bounded(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    worker = SubAgent(
+        name="worker-plan",
+        role=AgentRole.WORKER,
+        llm_client=FakeTeamClient(),
+        tool_registry=ToolRegistry(),
+        config=load_config(project_root=tmp_path),
+        cwd=str(tmp_path),
+        max_plan_depth=1,
+    )
+
+    result = asyncio.run(
+        worker.execute(AgentMessage.task("test", "recursive task"), mode="plan", plan_depth=1)
+    )
+
+    assert result.type == AgentMessageType.ERROR
+    assert "depth limit" in result.content
+
+
+def test_reviewer_rejection_after_retry_marks_step_failed(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    orchestrator = _orchestrator(tmp_path, FakeTeamClient())
+    orchestrator.max_retries_per_step = 1
+    steps = [ExecutionStep("step_1", "implement", "ANALYSIS", [])]
+
+    class Worker:
+        async def execute(self, task, context, *, mode):  # noqa: ARG002
+            return AgentMessage.result("worker", AgentRole.WORKER, "unverified result")
+
+    class Reviewer:
+        async def review(self, original_task, execution_result):  # noqa: ARG002
+            return AgentMessage.result(
+                "reviewer",
+                AgentRole.REVIEWER,
+                '{"approved":false,"issues":["missing verification"]}',
+            )
+
+        def clear_history(self):
+            return None
+
+    asyncio.run(orchestrator._run_step(steps[0], steps, {}, Worker(), Reviewer()))
+
+    assert steps[0].status == StepStatus.FAILED
+    assert "missing verification" in steps[0].result
 
 
 class FakeTeamClient:
